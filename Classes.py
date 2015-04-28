@@ -1,6 +1,8 @@
 # VEX ROBOTICS RAMP robot
 # noinspection PyPep8
-import time, dateTime
+import time
+import datetime
+import math
 
 """Modules
     set()
@@ -30,6 +32,15 @@ Output Drivers
     engaged(boolean)
         turns driver on or off
 """
+
+waitingQue = []
+
+
+def date_of_next_weekday(weekday, today=datetime.datetime.today()):
+    days_to_go = 6 - today.weekday()
+    if days_to_go:
+        today += datetime.timedelta(days_to_go)
+    return today
 
 
 def echo():
@@ -125,6 +136,12 @@ class Event(Command):
 
 
 class Variable():
+    """
+    post:   passes post method the value of variable and post_args
+    listen:
+    set:
+    """
+
     def __str__(self):
         return str(self.value)
 
@@ -145,7 +162,7 @@ class Variable():
         return value
 
     def post(self):
-        self.postMethod(*self.postArgs)
+        self.postMethod(self.value, *self.postArgs)
 
     def listen(self, alert_function):
         self.listeners.append(alert_function)
@@ -375,12 +392,33 @@ class IntegerVariable(Variable):
         self.value = self.convertValue(start_state)
 
 
+def datetime_from_dict(values, reverse=False):
+    if not reverse:
+        return datetime.datetime(
+            values['$Y'],
+            values['$M'],
+            values['$D'],
+            values['%H'],
+            values['%M'],
+            values['%S']
+        )
+    else:
+        return {
+            '$Y': values.year,
+            '$M': values.month,
+            '$D': values.day,
+            '%H': values.hour,
+            '%M': values.minute,
+            '%S': values.second,
+        }
+
+
 class TimeVariable(Variable):
     """
     will alert listeners when target_time is reached
     """
 
-    def __init__(self, target_time, time_format="%H%M%S", *post_arguments):
+    def __init__(self, target_time, post_method, time_format="%H%M%S", *post_arguments):
         """
             tokens:
                 $: date value
@@ -397,11 +435,8 @@ class TimeVariable(Variable):
                 %h 12 hour hour     (e.g. 1)
                 %M minute           (e.g. 32)
                 %S second           (e.g. 15)
-                %n decimal seconds  (e.g. 12, 15, 1500) #  number of digits indicates accuracy needed (0.15 != 0.150)
-            if decimal seconds is not specified, the event will trigger at any time during the specified second.
-            Similarly,
-            if the seconds is not specified, this function will not automatically set it to zero, nor will it in any way
-            account for seconds. The event will occur during the specified time.
+            if a value is not specified, this function will not automatically set it to zero, nor will it in any way
+            account for the value.
             :param target_time: time, according to format specified. Each variable should be separated with some mark
                 if several numbers are inside a single variable separated by a comma, each will be tested (e.g. 1,2,
                 3,4:30)
@@ -411,59 +446,142 @@ class TimeVariable(Variable):
                     will trigger at 12:30, 12:45, 3:30, 3:45, 4:30, 4:45
             :param time_format: time format, include any formatting marks (e.g. %H:%M)
             """
-        
-        Variable.__init__(self, *post_arguments)
+
+        Variable.__init__(self, post_method, *post_arguments)
         self.format = time_format
-        self.timeSymbols = ['$Y', '$M', '$m', '$D', '$d', '%H', '%h', '%M', '%S', '%n']
+        self.timeSymbols = ['$Y', '$M', '$m', '$D', '$d', '%H', '%h', '%M', '%S']
         self.dateTimeEquivelent = []
         self.targetTime = {
-            '$Y': None,
-            '$M': None,
-            '$m': None,
-            '$D': None,
-            '$d': None,
-            '%H': None,
-            '%h': None,
-            '%M': None,
-            '%S': None,
-            '%n': None
+            '$Y': [],
+            '$M': [],
+            '$m': [],
+            '$D': [],
+            '$d': [],
+            '%H': [],
+            '%h': [],
+            '%M': [],
+            '%S': [],
         }
         self.month_converter = {
-                    None:        None,
-                    'january':   1,
-                    'february':  2,
-                    'march':     3,
-                    'april':     4,
-                    'may':       5,
-                    'june':      6,
-                    'july':      7,
-                    'august':    8,
-                    'september': 9,
-                    'october':   10,
-                    'november':  11,
-                    'december':  12
-                }
+            'january': 1,
+            'february': 2,
+            'march': 3,
+            'april': 4,
+            'may': 5,
+            'june': 6,
+            'july': 7,
+            'august': 8,
+            'september': 9,
+            'october': 10,
+            'november': 11,
+            'december': 12
+        }
+        self.value = self.get_next_time
+
+    def post(self):
+        self.postMethod(self.value, self.postArgs)
+        self.set(self.get_next_time())
+        global waitingQue
+        waitingQue.append((self.value, self.post))
 
     def get_next_time(self):
-        self.targetTime['D']
+        """
+        :return: datetime.datetime for the next time this object should be posted according to the preset schedule
+        """
+        valid_times = self.targetTime  # times that this object is permitted to run, to be modified in this method
+        today = datetime.datetime.today()  # the time at the moment that the next_time is to be retrieved
+        next_time = datetime_from_dict(today, True)  # 'today' in dictionary form
+        keys = ['$Y', '$M', '$D', '%H', '%M', '%S']  # all of the different units of time to be considered
+        i = -1
+        while i < len(keys):
+            i += 1
+            key = keys[i]  # the current unit being evaluated
+            current_value_list = sorted(valid_times[key])  # should be sorted in ascending order; list of valid values
 
-    def convertValues(self):
-        if type(self.targetTime['$M']) != list and type(self.targetTime['$m']) == list:
-            self.targetTime['$M'] = []
+            if key == '$D' and valid_times['$d']:  # if we are deciding the day-of-the-week
+                valid_weekdays = sorted(valid_times['$d'])
+                for weekday in valid_weekdays:
+                    new_date = date_of_next_weekday(weekday,
+                                                    datetime_from_dict(next_time))  # datetime object for next 'weekday'
+                    if new_date >= today:  # if new_date occurs after today
+                        valid_times['$D'].append(new_date)  # add the new_date to the days
+
+            if not current_value_list:
+                """
+                checks if next_time[key] is a float because the next key has no valid values. If it is, it will try
+                to add one to the current next_time[key]. To test whether this is a real time or not, a datetime
+                obj will be created. If a valueError is raised, to signal an invalid date/time, done will be set to
+                False and the preceding value will be pushed forward
+                """
+                if type(next_time[key]) == float:
+                    next_time[key] = math.ceil(next_time[key])
+                    try:
+                        datetime_from_dict(next_time)
+                        done = True
+                    except ValueError:
+                        done = False
+                        next_time[key] -= 1
+                else:
+                    done = True
+
+            else:
+                done = False  # a valid date has not yet been found
+                for value in current_value_list:
+                    if value >= next_time[key]:  # if the value being inspected is past now:
+                        if value != next_time[key]:
+                            for lesser_unit in range(i, len(keys)):
+                                # this makes sure that, if it is 11:00 on a monday, 9:00 next tuesday is still valid.
+                                # Without this, 9:00 would be interpreted as before 11:00 and marked invalid
+                                # because that time has already passed. In fact, that time has not passed, and the
+                                # computer must not think that it has. This loop goes through every unit of time smaller
+                                # than the one being edited and sets it's value to 0. Nothing can be before 0, and thus
+                                # the bug is remedied.
+                                lesser_unit = keys[lesser_unit]
+                                next_time[lesser_unit] = 0
+                        next_time[key] = value
+                        done = True
+                        break
+            if not done:  # if no valid date has been found,
+                """
+                if no valid date has been found, one must change the unit of time preceding the current unit of
+                time to another value.
+                if there it is 11:00 on monday, monday is a valid day, but 9:00 is not a valid time. If 9:00 is
+                the only option, this function must change the "next time"'s day to another valid_value for day
+                that is after monday.
+                This tries to delete the value that originally set the day to monday,
+                If that is not possible (most likely because '$D' is an empty list and monday is the default because
+                it is today) it will add .5 to the
+                This sets i back one unit to re-evaluate the previous thing
+                if there is an empty list in the valid_times[key], and the next_time entry is a float, one unit of
+                time will be added to the value. if that results in a change in it's parent value, this will happen
+                again
+                """
+                previous_key = keys[i - 1]
+                try:
+                    del valid_times[previous_key][valid_times[previous_key].index(next_time[previous_key])]
+                except KeyError:
+                    next_time[previous_key] = float(next_time[previous_key] + .5)
+                # the above thingy removes from the valid_times the
+                i -= 2
+        next_time = datetime_from_dict(next_time)
+        return next_time
+
+    def convert_target_time(self, value):
+        if len(self.targetTime['$m']):
             for month in self.targetTime['$m']:
                 self.targetTime['$M'].append(self.month_converter[month])
 
-        if type(self.targetTime['%H']) != list and type(self.targetTime['%h']) == list:
-            self.targetTime['%H'] = []
+        if len(self.targetTime['%h']):
             for hour in self.targetTime['%h']:
                 self.targetTime['%H'].append(hour)
                 self.targetTime['%H'].append(hour + 12)
 
+        self.timeSymbols.remove('$m')
+        self.timeSymbols.remove('%h')
+        del self.targetTime['$m']
+        del self.targetTime['$h']
 
-
-
-
-    def set_target_time(self, string, symbol):
+    def set_target_time(self, string):
         """
         goes through time mask and finds all '$' and '%'. Beginning with the lowest indexes, it lists the seporators and
         symbols in order, in two lists. A for loop begins which itterates through each list. It looks between the end of
@@ -473,24 +591,19 @@ class TimeVariable(Variable):
         ending = '&^%$#'
         symbols = []
         separators = []
-        temp_string_mask = self.format  #for editing
+        temp_string_mask = self.format  # for editing
         while True:
             position = min(temp_string_mask.find('%'), temp_string_mask.find('$'))
             separators.append(self.format[0:position])
-            symbols.append(string[position:position+2])
-            temp_string_mask = temp_string_mask[position+2:]
+            symbols.append(string[position:position + 2])
+            temp_string_mask = temp_string_mask[position + 2:]
         separators.append(ending)
         string += ending
         for i in range(len(symbols)):
-            startSlice = string.find(separators[i]) + len(symbols)  # TODO: replace find with index (later)
-            endSlice = string.find(separators[i+1])
-            value = string[startSlice:endSlice].split(',').sort()  # turns to list of different possible hours
+            start_slice = string.find(separators[i]) + len(symbols)  # TODO: replace find with index (later)
+            end_slice = string.find(separators[i + 1])
+            value = string[start_slice:end_slice].split(',').sort()  # turns to list of different possible values
             self.targetTime[separators[i]] = value
-
-
-
-            
-
 
 
 class RangedVariable(IntegerVariable):
