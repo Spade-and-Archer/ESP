@@ -37,109 +37,58 @@ waitingQue = []
 
 
 def date_of_next_weekday(weekday, today=datetime.datetime.today()):
+    """
+    finds the next instance of a target weekday and returns the corresponding datetime object
+    :param weekday: day of the week to find (0 = monday, 1 = tuesday
+    :param today: date to search from
+    :return:
+    """
     days_to_go = 6 - today.weekday()
     if days_to_go:
         today += datetime.timedelta(days_to_go)
     return today
 
 
-def echo():
+def datetime_from_dict(values, reverse=False):
+    """
+    takes a dictionary containing symbols such as $Y, $M, $D, etc. and turns them into a datetime object. The
+    dictionaries are used when multiple years, months, or days need to be included but are not compatible with
+    the datetime module.
+    :param values: either a dictionary or a datetime object depending on 'reverse'
+    :param reverse: If reverse is  false (default), this will change a dict into a datetime. Otherwise, it turns a
+    datetime into a dict
+    :return:
+    """
+    if not reverse:
+        return datetime.datetime(
+            values['$Y'],
+            values['$M'],
+            values['$D'],
+            values['%H'],
+            values['%M'],
+            values['%S']
+        )
+    else:
+        return {
+            '$Y': values.year,
+            '$M': values.month,
+            '$D': values.day,
+            '%H': values.hour,
+            '%M': values.minute,
+            '%S': values.second,
+        }
+
+
+def echo(*args):
+    """does nothing"""
     pass
-
-
-class Command():  # update variables matrix and listener related functions
-    """
-    methods
-        load: loads relevant variables for execution
-        post: executes, exists for subclass creation
-        execute: runs all of the commands and passes them the modules listed. recommended commands have *args
-        secure: removes system oriented modules from list of modules and returns it in tuple form
-    """
-
-    def __init__(self, commands, modules, adminPass=False):
-        """
-            :param commands: list of python functions to run with 'modules' as args
-            :param modules: string list of modules to load
-            """
-        self.bannedModules = []
-        self.adminPass = adminPass
-        self.modules = self.load(modules)
-        self.commands = commands
-
-    def secure(self, modules):
-        if self.adminPass == "PassPhrase":
-            self.bannedModules = []
-        else:
-            self.bannedModules = ['sys', 'os', 'os2']
-        for bannedModule in self.bannedModules:
-            try:
-                modules.remove(bannedModule)
-            except:
-                pass
-        return modules
-
-    def post(self):
-        self.execute()
-
-    def load(self, modules):
-        modules = self.secure(modules)
-        module_object_list = []
-        for key in globals().keys():
-            for module in modules:
-                if key == module:
-                    module_object_list.append(module)
-                    break
-        return tuple(module_object_list)
-
-    def execute(self):
-        """
-        :return: None
-        """
-        for command in self.commands:
-            command(*self.modules)
-
-
-class Event(Command):
-    """
-    checks over conditions upon triggers being activated. Useful for common commands and scheduled objects
-    """
-    # TODO: must add time conditions handler (new 'Scheduled object' class?)
-    def __init__(self, commands, modules, triggers, conditions, adminPass=False):
-        """
-            :param commands: list of functions to be passed the requested modules and run. recommend define with *args
-            :param modules: string list of modules to load
-            :param triggers: list of IntegerVariable objects to listen to
-            :param conditions: list of python functions that should return True or False when passed requested modules
-            """
-        Command.__init__(self, commands, modules, adminPass)
-        for variable in triggers:
-            variable.listen(self.post)
-        self.conditions = conditions
-
-    def check_conditions(self):
-        """
-        :return: If all conditions are true, it returns true; otherwise it returns false.
-        checks all of the conditions that exist on this command.
-        """
-        for condition in self.conditions:
-            if not condition(*self.modules):
-                return False
-        return True
-
-    def post(self):
-        """
-        checks conditions and executes if conditions are met
-        :return: None
-        """
-        if self.check_conditions():
-            self.execute()
 
 
 class Variable():
     """
     post:   passes post method the value of variable and post_args
-    listen:
-    set:
+    listen: executes the passed function with the optional 'listArgs' whenever the value of this variable is set
+    set: sets the value of this variable and executes listening functions
     """
 
     def __str__(self):
@@ -158,19 +107,102 @@ class Variable():
         self.value = initial
         self.listeners = []
 
-    def convertValue(self, value):
+    def convert_value(self, value):
+        """
+        A function used internally that converts 'value' to a valid value. Used in set().
+        """
         return value
 
     def post(self):
+        """
+        activates post method and passes it postArgs
+        """
         self.postMethod(self.value, *self.postArgs)
 
-    def listen(self, alert_function):
-        self.listeners.append(alert_function)
+    def listen(self, alert_function, *alertArgs):
+        """
+        :param alert_function: function to be called when the value of this variable is altered
+        :param alertArgs: arguments to pass to alert_function when it is called
+        """
+        self.listeners.append((alert_function, alertArgs))
 
     def set(self, value):
-        self.value = self.convertValue(value)
+        """
+        sets the value of the variable to 'value'
+        """
+        self.value = self.convert_value(value)
         for listener in self.listeners:
-            listener()
+            listener[0](*listener[1])
+
+
+class Command():  # update variables matrix and listener related functions
+    """
+    methods
+        load: loads relevant variables for execution
+        post: executes, exists for subclass creation
+        execute: runs all of the commands and passes them the modules listed. recommended commands have *args
+        secure: removes system oriented modules from list of modules and returns it in tuple form
+    """
+
+    def __init__(self, commands, modules, adminPass=False):
+        """
+            :param commands: list of python functions to run with 'modules' as args
+            :param modules: string list/tuple of modules to load
+            recommended that the modules list/tuple be duplicated in the function args.
+            """
+        self.bannedModules = []
+        self.adminPass = adminPass
+        self.modules = self.load(modules)
+        self.commands = commands
+
+    def secure(self, modules):
+        """
+        if self.adminPass is correct, it will unlock the sys, os, and os2 variables and allow them to be used.
+        This method is far from complete and only really exists as a placeholder.
+        :param modules: list of modules to be filtered
+        :return:
+        """
+        if self.adminPass == "PassPhrase":
+            self.bannedModules = []
+        else:
+            self.bannedModules = ['sys', 'os', 'os2']
+        for bannedModule in self.bannedModules:
+            try:
+                modules.remove(bannedModule)
+            except:
+                pass
+        return modules
+
+    def post(self):
+        """
+        This function is presently the same as execute, but child classes change this function. It is also recommended
+        over execute because post() is very universal, execute is not.
+        :return:
+        """
+        self.execute()
+
+    def load(self, modules):
+        """
+        takes modules and puts them in a tuple so they may be passed to the functions that are to be executed
+        :param modules: modules to be loaded
+        :return:
+        """
+        modules = self.secure(modules)
+        module_object_list = []
+        for module in modules:
+            for key in globals().keys():
+                if key == module:
+                    module_object_list.append(module)
+                    break
+        return tuple(module_object_list)
+
+    def execute(self):
+        """
+        runs each command specified in __init__ and runs it with the modules also loaded in __init__
+        :return: None
+        """
+        for command in self.commands:
+            command(*self.modules)
 
 
 class IntegerVariable(Variable):
@@ -178,9 +210,11 @@ class IntegerVariable(Variable):
     :var self.post: corresponds to post_method will be used to update the variable
     :var self.value: the current value of the object. Will automatically be used in mathematical operations
     :var self.listeners: a list of functions to be called (without post_arguments) when the value changes
-    A variable is an integer like object which can be listened to. IntegerVariable.listen(function) will cause the execution of
+    A variable is an integer like object which can be listened to. IntegerVariable.listen(function) will cause the
+    execution of
     that function should the variable be modified. For this reason, IntegerVariable.set(x) should be used instead of
-    IntegerVariable.value = x. the value can be any class with numerical operation methods, (e.g. int, float, or any sub-class
+    IntegerVariable.value = x. the value can be any class with numerical operation methods, (e.g. int, float,
+    or any sub-class
     of those).
     NOTE: use RangedVariable.set(value) to set value, do NOT use RangedVariable.value=value
         THESE SHOULD NOT BE DONE
@@ -389,28 +423,67 @@ class IntegerVariable(Variable):
             class contains post, value, and listeners
             """
         Variable.__init__(self, start_state, post_method, *post_arguments)
-        self.value = self.convertValue(start_state)
+        self.value = self.convert_value(start_state)
 
 
-def datetime_from_dict(values, reverse=False):
-    if not reverse:
-        return datetime.datetime(
-            values['$Y'],
-            values['$M'],
-            values['$D'],
-            values['%H'],
-            values['%M'],
-            values['%S']
-        )
-    else:
-        return {
-            '$Y': values.year,
-            '$M': values.month,
-            '$D': values.day,
-            '%H': values.hour,
-            '%M': values.minute,
-            '%S': values.second,
-        }
+class RangedVariable(IntegerVariable):
+    """
+    A ranged variable is one which is an integer-like object restricted to a certain range. If one attempted to set()
+    this variable to a value outside that range, it will instead be set() to the nearest possible value.
+    example:
+        var = RangedVariable(initial_value = 0, min_value = 0, max_value = 10)
+        set(var, 5)
+        print var  # prints 5
+        set(var, 10)
+        print var  # prints 10
+        set(var, 15)
+        print var  # prints 10
+        set(var, -1)
+        print var  # prints 0
+    It can be either an int or a float and is useful for controlling things that cannot exceed a certain value.
+    NOTE: use RangedVariable.set(value) to set value, do NOT use RangedVariable.value=value
+        THESE SHOULD NOT BE DONE
+            WRONG RangedVariable = x + y
+            WRONG RangedVariable.value = x + y
+            WRONG RangedVariable = RangedVariable + 1
+        THESE SHOULD BE DONE
+            RIGHT RangedVariable += 1
+            RIGHT RangedVariable.set(x + y)
+        this is due to the nature of the '=', if '=' is used, the variable will become a simple integer. It will no
+        longer be a RangedVariable. the normal mathematical operators will work.
+        Using RangedVariable.value = ... can cause problems because the value will not be converted properly. it will
+        be set to a new number without checking that it is within it's limits
+    """
+
+    def __init__(self, initial=0, min_value=0, max_value=10, post_method=echo(), *post_arguments):
+        """
+            :param post_method:  a function which will send the variables value to a driver when passed that value
+            :param initial:  an integer representing the initial value of the variable
+            :param max_value:    an integer representing the maximum value of the variable
+            :param min_value: an integer representing the minimum value of the variable
+
+        """
+
+        self.post = post_method
+        self.max = max_value
+        self.min = min_value
+        IntegerVariable.__init__(self, initial, post_method, *post_arguments)
+
+    def convert_value(self, value):
+        """
+        converts value to one inside the range. Specifically, makes anything higher than max equal to max and
+        anything lower than min equal to min.
+        """
+        value = min(self.max, value)
+        value = max(self.min, value)
+        return value
+
+    def set(self, value):
+        self.value = value
+        if not self.max >= self.value >= self.min:
+            self.value = self.convert_value(value)
+        for listener in self.listeners:
+            listener()
 
 
 class TimeVariable(Variable):
@@ -418,7 +491,21 @@ class TimeVariable(Variable):
     will alert listeners when target_time is reached
     """
 
-    def __init__(self, target_time, post_method, time_format="%H%M%S", *post_arguments):
+    def weekday(self, weekday):
+        """
+        :param weekday: weekdays are from 0-6 and may be in tuple, integer, or string form
+        :return: TimeVariable
+        """
+        return self.__init__(str(weekday).strip(')').strip('('), "$d")
+
+    def hour(self, hour):
+        """
+        :param hour: hours from 1-24 and may be in tuple, integer, or string form
+        :return: TimeVariable
+        """
+        return self.__init__(str(hour).strip(')').strip('('), "$H")
+
+    def __init__(self, target_time, post_method=echo, time_format="%H%M%S", *post_arguments):
         """
             tokens:
                 $: date value
@@ -450,7 +537,6 @@ class TimeVariable(Variable):
         Variable.__init__(self, post_method, *post_arguments)
         self.format = time_format
         self.timeSymbols = ['$Y', '$M', '$m', '$D', '$d', '%H', '%h', '%M', '%S']
-        self.dateTimeEquivelent = []
         self.targetTime = {
             '$Y': [],
             '$M': [],
@@ -476,6 +562,7 @@ class TimeVariable(Variable):
             'november': 11,
             'december': 12
         }
+        self.set_target_time(target_time)
         self.value = self.get_next_time
 
     def post(self):
@@ -566,7 +653,12 @@ class TimeVariable(Variable):
         next_time = datetime_from_dict(next_time)
         return next_time
 
-    def convert_target_time(self, value):
+    def convert_target_time(self):
+        """
+        cleans up target_time dictionary and merges redundant variables. Does not clear days of the week, this
+        is left to the get_next_time function
+        :return:
+        """
         if len(self.targetTime['$m']):
             for month in self.targetTime['$m']:
                 self.targetTime['$M'].append(self.month_converter[month])
@@ -583,8 +675,8 @@ class TimeVariable(Variable):
 
     def set_target_time(self, string):
         """
-        goes through time mask and finds all '$' and '%'. Beginning with the lowest indexes, it lists the seporators and
-        symbols in order, in two lists. A for loop begins which itterates through each list. It looks between the end of
+        goes through time mask and finds all '$' and '%'. Beginning with the lowest indexes, it lists the separators and
+        symbols in order, in two lists. A for loop begins which iterates through each list. It looks between the end of
         each separator and the beginning of the next and adds that value to the target time dict according to the
         current symbol
         """
@@ -592,7 +684,7 @@ class TimeVariable(Variable):
         symbols = []
         separators = []
         temp_string_mask = self.format  # for editing
-        while True:
+        while len(temp_string_mask):
             position = min(temp_string_mask.find('%'), temp_string_mask.find('$'))
             separators.append(self.format[0:position])
             symbols.append(string[position:position + 2])
@@ -606,60 +698,42 @@ class TimeVariable(Variable):
             self.targetTime[separators[i]] = value
 
 
-class RangedVariable(IntegerVariable):
+class Event(Command):
     """
-    A ranged variable is one which is an integer-like object restricted to a certain range. If one attempted to set()
-    this variable to a value outside that range, it will instead be set() to the nearest possible value.
-    example:
-        var = RangedVariable(initial_value = 0, min_value = 0, max_value = 10)
-        set(var, 5)
-        print var  # prints 5
-        set(var, 10)
-        print var  # prints 10
-        set(var, 15)
-        print var  # prints 10
-        set(var, -1)
-        print var  # prints 0
-    It can be either an int or a float and is useful for controlling things that cannot exceed a certain value.
-    NOTE: use RangedVariable.set(value) to set value, do NOT use RangedVariable.value=value
-        THESE SHOULD NOT BE DONE
-            WRONG RangedVariable = x + y
-            WRONG RangedVariable.value = x + y
-            WRONG RangedVariable = RangedVariable + 1
-        THESE SHOULD BE DONE
-            RIGHT RangedVariable += 1
-            RIGHT RangedVariable.set(x + y)
-        this is due to the nature of the '=', if '=' is used, the variable will become a simple integer. It will no
-        longer be a RangedVariable. the normal mathematical operators will work.
-        Using RangedVariable.value = ... can cause problems because the value will not be converted properly. it will
-        be set to a new number without checking that it is within it's limits
+    checks over conditions upon triggers being activated. Useful for common commands and scheduled objects
     """
-
-    def __init__(self, initial=0, min_value=0, max_value=10, post_method=echo(), *post_arguments):
+    # TODO: must add time conditions handler (new 'Scheduled object' class?)
+    def __init__(self, commands, modules, triggers, conditions, adminPass=False):
         """
-            :param post_method:  a function which will send the variables value to a driver when passed that value
-            :param initial:  an integer representing the initial value of the variable
-            :param max_value:    an integer representing the maximum value of the variable
-            :param min_value: an integer representing the minimum value of the variable
+            :param commands: list of functions to be passed the requested modules and run. recommend define with *args
+            :param modules: string list of modules to load
+            :param triggers: list of Variable objects to listen to. Time objects must be created and then added
+            as triggers
+            :param conditions: list of python functions that should return True or False when passed ALL loaded modules
+            ensure all conditions can take enough variables
+            """
+        Command.__init__(self, commands, modules, adminPass)
+        for variable in triggers:
+            variable.listen(self.post)
+        self.conditions = conditions
 
+    def check_conditions(self):
         """
+        :return: If all conditions are true, it returns true; otherwise it returns false.
+        checks all of the conditions that exist on this command.
+        """
+        for condition in self.conditions:
+            if not condition(*self.modules):
+                return False
+        return True
 
-        self.post = post_method
-        self.max = max_value
-        self.min = min_value
-        IntegerVariable.__init__(self, initial, post_method, *post_arguments)
-
-    def convertValue(self, value):
-        value = min(self.max, value)
-        value = max(self.min, value)
-        return value
-
-    def set(self, value):
-        self.value = value
-        if not self.max >= self.value >= self.min:
-            self.value = self.convertValue(value)
-        for listener in self.listeners:
-            listener()
+    def post(self):
+        """
+        checks conditions and executes if conditions are met
+        :return: None
+        """
+        if self.check_conditions():
+            self.execute()
 
 
 class VariableMatrix():
@@ -676,16 +750,28 @@ class VariableMatrix():
     post() iterates through variables and posts them each
     """
 
-    def __init__(self, variables={}):
+    def __init__(self, variables=None):
         """
         :param variables: a dictionary object of variable and their keys
         :return:
         """
+        if not variables:
+            variables = dict()
         self.variables = variables
+        self.old_values = {}
+        self.update_old_values()
+
+    def update_old_values(self):
+        keys = sorted(self.variables.keys())
+        for i in range(len(keys)):
+            value = int(self.variables[keys[i]])
+            self.old_values[keys[i]] = value
 
     def post(self):
-        for variable in self.variables:
-            variable.post()
+        keys = self.variables.keys()
+        for i in range(len(self.variables)):
+            if self.old_values[keys[i]] != int(self.variables[keys[i]]):
+                self.variables[keys[i]].post()
 
     def __setitem__(self, key, value):
         value = value
@@ -703,35 +789,6 @@ class VariableMatrix():
 
     def listen(self, alert_function, variable):
         self.variables[variable].listen(alert_function)
-
-
-class Module(VariableMatrix):
-    """
-    pass variable dictionary to reference and post_method with args, and all variable posting will become automated.
-    """
-
-    def __init__(self, variables, post_method=echo, *postArgs):
-        """
-        :param variables: dictionary of string keys and IntegerVariable values which will be contained in the module
-        :param post_method: a function which will be used to post each variable. This method will replace the previously
-        configured method. if set to echo, it will have no effect.
-        :param *postArgs: arguments that will be past to the post_method (unless post_method is echo)
-
-        :type postArgs: dict
-        """
-        VariableMatrix.__init__(self, variables)
-        assert isinstance(variables, dict)
-        if post_method != echo:
-            for key in variables.keys():
-                variables[key].postMethod = post_method
-                temporary_post_args = list(postArgs).insert(0, key)
-                variables[key].postArgs = temporary_post_args
-        self.postMethod = post_method
-        self.postArgs = postArgs
-
-    def post(self):
-        for variable in self.variables:
-            variable.post()
 
 
 class InputDriver():
@@ -781,7 +838,6 @@ class InputDriver():
         """
         while True:
             self.post()
-            print 'hi'
             time.sleep(self.refreshPeriod)
 
 
