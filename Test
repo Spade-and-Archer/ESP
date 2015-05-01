@@ -1,0 +1,5 @@
+from Classes import *
+
+testTime = TimeVariable('January/15:12,13,14.30,35,40.10,20,30', time_format="$m/$D:%h.%M.%S")
+print testTime.targetTime
+print testTime

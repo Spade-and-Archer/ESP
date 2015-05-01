@@ -61,12 +61,12 @@ def datetime_from_dict(values, reverse=False):
     """
     if not reverse:
         return datetime.datetime(
-            values['$Y'],
-            values['$M'],
-            values['$D'],
-            values['%H'],
-            values['%M'],
-            values['%S']
+            year=int(math.ceil(float(values['$Y']))) + 0,
+            month=int(math.ceil(float(values['$M']))) + 0,
+            day=int(math.ceil(float(values['$D']))) + 0,
+            hour=int(math.ceil(float(values['%H']))) + 0,
+            minute=int(math.ceil(float(values['%M']))) + 0,
+            second=int(math.ceil(float(values['%S']))) + 0
         )
     else:
         return {
@@ -563,7 +563,8 @@ class TimeVariable(Variable):
             'december': 12
         }
         self.set_target_time(target_time)
-        self.value = self.get_next_time
+        self.convert_target_time()
+        self.value = self.get_next_time()
 
     def post(self):
         self.postMethod(self.value, self.postArgs)
@@ -580,7 +581,7 @@ class TimeVariable(Variable):
         next_time = datetime_from_dict(today, True)  # 'today' in dictionary form
         keys = ['$Y', '$M', '$D', '%H', '%M', '%S']  # all of the different units of time to be considered
         i = -1
-        while i < len(keys):
+        while i < len(keys) - 1:
             i += 1
             key = keys[i]  # the current unit being evaluated
             current_value_list = sorted(valid_times[key])  # should be sorted in ascending order; list of valid values
@@ -591,23 +592,25 @@ class TimeVariable(Variable):
                     new_date = date_of_next_weekday(weekday,
                                                     datetime_from_dict(next_time))  # datetime object for next 'weekday'
                     if new_date >= today:  # if new_date occurs after today
-                        valid_times['$D'].append(new_date)  # add the new_date to the days
+                        valid_times['$D'].append(int(new_date.date))  # add the new_date to the days
 
             if not current_value_list:
                 """
-                checks if next_time[key] is a float because the next key has no valid values. If it is, it will try
-                to add one to the current next_time[key]. To test whether this is a real time or not, a datetime
-                obj will be created. If a valueError is raised, to signal an invalid date/time, done will be set to
-                False and the preceding value will be pushed forward
+                checks if next_time[key] is a float because, if it is, the next key has no valid values.
+                If it is, it will try to add one to the current next_time[key]. To test whether this is a
+                real time or not, a datetime obj will be created. If a valueError is raised, to signal an
+                invalid date/time, done will be set to False and the preceding value will be pushed forward
                 """
-                if type(next_time[key]) == float:
+                if next_time[key] != math.ceil(next_time[key]):
                     next_time[key] = math.ceil(next_time[key])
-                    try:
-                        datetime_from_dict(next_time)
-                        done = True
-                    except ValueError:
+
+                    datetime_from_dict(next_time)
+                    done = True
+
+                    """except ValueError:
+                        print ValueError
                         done = False
-                        next_time[key] -= 1
+                        next_time[key] -= 1"""
                 else:
                     done = True
 
@@ -616,7 +619,7 @@ class TimeVariable(Variable):
                 for value in current_value_list:
                     if value >= next_time[key]:  # if the value being inspected is past now:
                         if value != next_time[key]:
-                            for lesser_unit in range(i, len(keys)):
+                            for lesser_unit in range(i + 1, len(keys)):
                                 # this makes sure that, if it is 11:00 on a monday, 9:00 next tuesday is still valid.
                                 # Without this, 9:00 would be interpreted as before 11:00 and marked invalid
                                 # because that time has already passed. In fact, that time has not passed, and the
@@ -624,7 +627,7 @@ class TimeVariable(Variable):
                                 # than the one being edited and sets it's value to 0. Nothing can be before 0, and thus
                                 # the bug is remedied.
                                 lesser_unit = keys[lesser_unit]
-                                next_time[lesser_unit] = 0
+                                next_time[lesser_unit] = .5
                         next_time[key] = value
                         done = True
                         break
@@ -646,8 +649,17 @@ class TimeVariable(Variable):
                 previous_key = keys[i - 1]
                 try:
                     del valid_times[previous_key][valid_times[previous_key].index(next_time[previous_key])]
-                except KeyError:
+                except ValueError:
                     next_time[previous_key] = float(next_time[previous_key] + .5)
+                for lesser_unit in range(i, len(keys)):
+                    # this makes sure that, if it is 11:00 on a monday, 9:00 next tuesday is still valid.
+                    # Without this, 9:00 would be interpreted as before 11:00 and marked invalid
+                    # because that time has already passed. In fact, that time has not passed, and the
+                    # computer must not think that it has. This loop goes through every unit of time smaller
+                    # than the one being edited and sets it's value to 0. Nothing can be before 0, and thus
+                    # the bug is remedied.
+                    lesser_unit = keys[lesser_unit]
+                    next_time[lesser_unit] = .5
                 # the above thingy removes from the valid_times the
                 i -= 2
         next_time = datetime_from_dict(next_time)
@@ -661,17 +673,17 @@ class TimeVariable(Variable):
         """
         if len(self.targetTime['$m']):
             for month in self.targetTime['$m']:
-                self.targetTime['$M'].append(self.month_converter[month])
+                self.targetTime['$M'].append(self.month_converter[month.lower()])
 
         if len(self.targetTime['%h']):
             for hour in self.targetTime['%h']:
-                self.targetTime['%H'].append(hour)
-                self.targetTime['%H'].append(hour + 12)
+                self.targetTime['%H'].append(int(hour))
+                self.targetTime['%H'].append(int(hour) + 12)
 
         self.timeSymbols.remove('$m')
         self.timeSymbols.remove('%h')
         del self.targetTime['$m']
-        del self.targetTime['$h']
+        del self.targetTime['%h']
 
     def set_target_time(self, string):
         """
@@ -680,22 +692,35 @@ class TimeVariable(Variable):
         each separator and the beginning of the next and adds that value to the target time dict according to the
         current symbol
         """
-        ending = '&^%$#'
+        endCap = '@#@#@#@#'
         symbols = []
         separators = []
-        temp_string_mask = self.format  # for editing
+        temp_string_mask = endCap + self.format + endCap  # for editing
+        string = endCap + string + endCap
         while len(temp_string_mask):
-            position = min(temp_string_mask.find('%'), temp_string_mask.find('$'))
-            separators.append(self.format[0:position])
-            symbols.append(string[position:position + 2])
-            temp_string_mask = temp_string_mask[position + 2:]
-        separators.append(ending)
-        string += ending
-        for i in range(len(symbols)):
-            start_slice = string.find(separators[i]) + len(symbols)  # TODO: replace find with index (later)
+            next_date = max(temp_string_mask.find('$'), -1)
+            next_time = max(temp_string_mask.find('%'), -1)
+            if next_date < 0 or next_time < 0:  # if either % or $ is not found
+                if next_date < 0 and next_time < 0:  # if there are no more of either in the string
+                    separators.append(temp_string_mask)  # add the ending of the mask to the separators
+                    break
+                else:  # if only one has run out, the nextTag is at the higher one
+                    next_tag = max(next_date, next_time)
+            else:
+                next_tag = min(next_date, next_time)
+
+            separators.append(temp_string_mask[0:next_tag])  # add the characters preceding the var to separators
+            symbols.append(temp_string_mask[next_tag:next_tag + 2])  # adds the time var to the symbols list
+            temp_string_mask = temp_string_mask[next_tag + 2:]  # takes the processed code out of the mask
+        # now have a list of separators, and what variables come between those separators
+        for i in range(len(symbols)):  # this will look between each set of separators and find the time var there
+            start_slice = string.find(separators[i]) + len(separators[i])  # TODO: replace find with index (later)
+            string = string[start_slice:]
             end_slice = string.find(separators[i + 1])
-            value = string[start_slice:end_slice].split(',').sort()  # turns to list of different possible values
-            self.targetTime[separators[i]] = value
+            # found either side of value
+            value = sorted(string[:end_slice].split(','))  # pulls content out and converts to list form
+            self.targetTime[symbols[i]] = value  # modifies the appropriate dictionary entry
+            string = string[end_slice:]
 
 
 class Event(Command):
