@@ -1,5 +1,7 @@
 from Classes import *
 
-testTime = TimeVariable('January/15:12,13,14.30,35,40.10,20,30', time_format="$m/$D:%h.%M.%S")
-print testTime.targetTime
-print testTime
+for weekday in range(0, 7):
+    print weekday
+    testTime = TimeVariable('5/' + str(weekday) + ':12,13,14.30,35,40.10,20,30', time_format="$M/$W:%h.%M.%S")
+    print testTime.targetTime
+    print testTime

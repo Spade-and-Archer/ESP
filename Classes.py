@@ -43,7 +43,9 @@ def date_of_next_weekday(weekday, today=datetime.datetime.today()):
     :param today: date to search from
     :return:
     """
-    days_to_go = 6 - today.weekday()
+    days_to_go = (int(weekday) - today.weekday())
+    if days_to_go < 0:
+        days_to_go += 7
     if days_to_go:
         today += datetime.timedelta(days_to_go)
     return today
@@ -491,12 +493,17 @@ class TimeVariable(Variable):
     will alert listeners when target_time is reached
     """
 
-    def weekday(self, weekday):
+    @staticmethod
+    def weekday(weekday):
         """
         :param weekday: weekdays are from 0-6 and may be in tuple, integer, or string form
         :return: TimeVariable
         """
-        return self.__init__(str(weekday).strip(')').strip('('), "$d")
+        if type(weekday) == str:
+            identifier = '$w'
+        else:
+            identifier = '$W'
+        return TimeVariable(str(weekday).strip(')').strip('('), identifier)
 
     def hour(self, hour):
         """
@@ -505,7 +512,7 @@ class TimeVariable(Variable):
         """
         return self.__init__(str(hour).strip(')').strip('('), "$H")
 
-    def __init__(self, target_time, post_method=echo, time_format="%H%M%S", *post_arguments):
+    def __init__(self, target_time, time_format="%H%M%S", post_method=echo, *post_arguments):
         """
             tokens:
                 $: date value
@@ -516,7 +523,8 @@ class TimeVariable(Variable):
                 $M month number     (e.g. 4)
                 $m month name       (e.g. january)
                 $D Day number       (e.g. 14, 29, 31)(not day number /7)
-                $d Day name         (e.g. tuesday, thursday)
+                $w Day name         (e.g. tuesday, thursday)
+                $W Day Num          (e.g. monday = 0, tuesday = 1, etc.)
 
                 %H 24 hour hour     (e.g. 22)
                 %h 12 hour hour     (e.g. 1)
@@ -534,15 +542,17 @@ class TimeVariable(Variable):
             :param time_format: time format, include any formatting marks (e.g. %H:%M)
             """
 
-        Variable.__init__(self, post_method, *post_arguments)
+        Variable.__init__(self, 0, post_method, *post_arguments)
+        self.listeners.append((post_method, post_arguments))
         self.format = time_format
-        self.timeSymbols = ['$Y', '$M', '$m', '$D', '$d', '%H', '%h', '%M', '%S']
+        self.timeSymbols = ['$Y', '$M', '$m', '$D', '$w', '$W', '%H', '%h', '%M', '%S']
         self.targetTime = {
             '$Y': [],
             '$M': [],
             '$m': [],
             '$D': [],
-            '$d': [],
+            '$w': [],
+            '$W': [],
             '%H': [],
             '%h': [],
             '%M': [],
@@ -561,6 +571,16 @@ class TimeVariable(Variable):
             'october': 10,
             'november': 11,
             'december': 12
+        }
+        self.weekday_converter = {
+            'monday': 0,
+            'tuesday': 1,
+            'wednesday': 2,
+            'thursday': 3,
+            'friday': 4,
+            'saturday': 5,
+            'sunday': 6,
+
         }
         self.set_target_time(target_time)
         self.convert_target_time()
@@ -584,16 +604,16 @@ class TimeVariable(Variable):
         while i < len(keys) - 1:
             i += 1
             key = keys[i]  # the current unit being evaluated
-            current_value_list = sorted(valid_times[key])  # should be sorted in ascending order; list of valid values
 
-            if key == '$D' and valid_times['$d']:  # if we are deciding the day-of-the-week
-                valid_weekdays = sorted(valid_times['$d'])
+            if key == '$D' and valid_times['$W']:  # if we are deciding the day-of-the-week
+                valid_weekdays = sorted(valid_times['$W'])
                 for weekday in valid_weekdays:
                     new_date = date_of_next_weekday(weekday,
                                                     datetime_from_dict(next_time))  # datetime object for next 'weekday'
                     if new_date >= today:  # if new_date occurs after today
-                        valid_times['$D'].append(int(new_date.date))  # add the new_date to the days
+                        valid_times['$D'].append(int(new_date.day))  # add the new_date to the days
 
+            current_value_list = sorted(valid_times[key])  # should be sorted in ascending order; list of valid values
             if not current_value_list:
                 """
                 checks if next_time[key] is a float because, if it is, the next key has no valid values.
@@ -680,10 +700,16 @@ class TimeVariable(Variable):
                 self.targetTime['%H'].append(int(hour))
                 self.targetTime['%H'].append(int(hour) + 12)
 
+        if len(self.targetTime['$w']):
+            for weekday in self.targetTime['$w']:
+                self.targetTime['$W'].append(self.weekday_converter[weekday])
+
         self.timeSymbols.remove('$m')
         self.timeSymbols.remove('%h')
+        self.timeSymbols.remove('$w')
         del self.targetTime['$m']
         del self.targetTime['%h']
+        del self.targetTime['$w']
 
     def set_target_time(self, string):
         """
@@ -914,3 +940,33 @@ class OutputDriver(VariableMatrix):
             self.variables[variable].listen(alert_function)
         except AttributeError:
             raise (AttributeError, "cannot listen to type " + type(self.variables[variable]))
+
+
+class WaitingQueue():
+    def __init__(self):
+        self.queue = []
+        self.oldqueue = self.queue
+        self.next_time = (datetime.datetime.today() + datetime.timedelta(days=900))
+        self.run()
+
+    def run(self):
+        delta_time = self.next_time - datetime.datetime.today()
+        update_period = datetime.timedelta(seconds=10)
+        while True:
+            if update_period >= delta_time:
+                delta_time = self.next_time - datetime.datetime.today()
+                time.sleep(delta_time)
+                self.actions_queue[0].post()
+                del self.times_queue[0]
+                del self.actions_queue[0]
+            if self.queue != self.oldqueue:
+                self.update()
+                delta_time = self.next_time - datetime.datetime.today()
+            else:
+                time.sleep(min(update_period.total_seconds(), delta_time) - 1)
+                delta_time = self.next_time - datetime.datetime.today()
+
+
+    def update(self):
+        self.queue.sort()
+        pass
