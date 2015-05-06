@@ -22,7 +22,7 @@ Requests
     executeCommand()
         code to execute
 
-Output Drivers
+OutputDrivers
     put()
         update current state with some object
     post()
@@ -505,14 +505,15 @@ class TimeVariable(Variable):
             identifier = '$W'
         return TimeVariable(str(weekday).strip(')').strip('('), identifier)
 
+    @staticmethod
     def hour(self, hour):
         """
         :param hour: hours from 1-24 and may be in tuple, integer, or string form
         :return: TimeVariable
         """
-        return self.__init__(str(hour).strip(')').strip('('), "$H")
+        return TimeVariable(str(hour).strip(')').strip('('), "$H")
 
-    def __init__(self, target_time, time_format="%H%M%S", post_method=echo, *post_arguments):
+    def __init__(self, target_time, scheduler, time_format="%H%M%S", post_method=echo, *postArgs):
         """
             tokens:
                 $: date value
@@ -540,11 +541,13 @@ class TimeVariable(Variable):
                     target_time = 12,3,4:30,45
                     will trigger at 12:30, 12:45, 3:30, 3:45, 4:30, 4:45
             :param time_format: time format, include any formatting marks (e.g. %H:%M)
+            :param post_method: a method that will be run with the postArgs supplied
+            :param postArgs: arguments to pass to post_method
             """
 
-        Variable.__init__(self, 0, post_method, *post_arguments)
-        self.listeners.append((post_method, post_arguments))
+        Variable.__init__(self, 0, post_method, *postArgs)
         self.format = time_format
+        self.last_run = datetime_from_dict(datetime.datetime.today(), True)
         self.timeSymbols = ['$Y', '$M', '$m', '$D', '$w', '$W', '%H', '%h', '%M', '%S']
         self.targetTime = {
             '$Y': [],
@@ -585,12 +588,15 @@ class TimeVariable(Variable):
         self.set_target_time(target_time)
         self.convert_target_time()
         self.value = self.get_next_time()
+        scheduler.append(self)
 
     def post(self):
-        self.postMethod(self.value, self.postArgs)
+        self.last_run = datetime_from_dict(self.value, True)
         self.set(self.get_next_time())
-        global waitingQue
-        waitingQue.append((self.value, self.post))
+        self.postMethod(self.value, *self.postArgs)
+        self.value = self.get_next_time()
+
+        print self.value
 
     def get_next_time(self):
         """
@@ -599,6 +605,7 @@ class TimeVariable(Variable):
         valid_times = self.targetTime  # times that this object is permitted to run, to be modified in this method
         today = datetime.datetime.today()  # the time at the moment that the next_time is to be retrieved
         next_time = datetime_from_dict(today, True)  # 'today' in dictionary form
+        today_dict = datetime_from_dict(today, True)
         keys = ['$Y', '$M', '$D', '%H', '%M', '%S']  # all of the different units of time to be considered
         i = -1
         while i < len(keys) - 1:
@@ -637,7 +644,9 @@ class TimeVariable(Variable):
             else:
                 done = False  # a valid date has not yet been found
                 for value in current_value_list:
-                    if value >= next_time[key]:  # if the value being inspected is past now:
+                    value = int(value)
+                    if value >= math.floor(next_time[key]):
+                        # if the value being inspected is past now:
                         if value != next_time[key]:
                             for lesser_unit in range(i + 1, len(keys)):
                                 # this makes sure that, if it is 11:00 on a monday, 9:00 next tuesday is still valid.
@@ -651,6 +660,12 @@ class TimeVariable(Variable):
                         next_time[key] = value
                         done = True
                         break
+            if key == '%S' and self.last_run == next_time:
+                try:
+                    del valid_times[key][valid_times[key].index(next_time[key])]
+                except:
+                    pass
+
             if not done:  # if no valid date has been found,
                 """
                 if no valid date has been found, one must change the unit of time preceding the current unit of
@@ -667,19 +682,19 @@ class TimeVariable(Variable):
                 again
                 """
                 previous_key = keys[i - 1]
-                try:
+                try:  # this is breaking dupe detection !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                     del valid_times[previous_key][valid_times[previous_key].index(next_time[previous_key])]
                 except ValueError:
                     next_time[previous_key] = float(next_time[previous_key] + .5)
-                for lesser_unit in range(i, len(keys)):
-                    # this makes sure that, if it is 11:00 on a monday, 9:00 next tuesday is still valid.
-                    # Without this, 9:00 would be interpreted as before 11:00 and marked invalid
-                    # because that time has already passed. In fact, that time has not passed, and the
-                    # computer must not think that it has. This loop goes through every unit of time smaller
-                    # than the one being edited and sets it's value to 0. Nothing can be before 0, and thus
-                    # the bug is remedied.
-                    lesser_unit = keys[lesser_unit]
-                    next_time[lesser_unit] = .5
+                # for lesser_unit in range(i, len(keys)):
+                # # this makes sure that, if it is 11:00 on a monday, 9:00 next tuesday is still valid.
+                #     # Without this, 9:00 would be interpreted as before 11:00 and marked invalid
+                #     # because that time has already passed. In fact, that time has not passed, and the
+                #     # computer must not think that it has. This loop goes through every unit of time smaller
+                #     # than the one being edited and sets it's value to 0. Nothing can be before 0, and thus
+                #     # the bug is remedied.
+                #     lesser_unit = keys[lesser_unit]
+                #     next_time[lesser_unit] = .5
                 # the above thingy removes from the valid_times the
                 i -= 2
         next_time = datetime_from_dict(next_time)
@@ -744,9 +759,16 @@ class TimeVariable(Variable):
             string = string[start_slice:]
             end_slice = string.find(separators[i + 1])
             # found either side of value
-            value = sorted(string[:end_slice].split(','))  # pulls content out and converts to list form
-            self.targetTime[symbols[i]] = value  # modifies the appropriate dictionary entry
+            values = sorted(string[:end_slice].strip().split(','))  # pulls content out and converts to list form
+            for value in range(len(values)):
+                values[value] = values[value].strip().lower()
+                try:
+                    values[value] = int(values[value])
+                except:
+                    pass
+            self.targetTime[symbols[i]] = values  # modifies the appropriate dictionary entry
             string = string[end_slice:]
+        print 'nothing'
 
 
 class Event(Command):
@@ -813,16 +835,23 @@ class VariableMatrix():
         self.update_old_values()
 
     def update_old_values(self):
+        """
+        updates list of old values that is used to detect changes to variables
+        """
         keys = sorted(self.variables.keys())
         for i in range(len(keys)):
             value = int(self.variables[keys[i]])
             self.old_values[keys[i]] = value
 
     def post(self):
+        """
+        checks for changes in module variables and posts() any altered variables
+        """
         keys = self.variables.keys()
         for i in range(len(self.variables)):
             if self.old_values[keys[i]] != int(self.variables[keys[i]]):
                 self.variables[keys[i]].post()
+        self.update_old_values()
 
     def __setitem__(self, key, value):
         value = value
@@ -838,7 +867,10 @@ class VariableMatrix():
     def __len__(self):
         return len(self.variables)
 
-    def listen(self, alert_function, variable):
+    def listen(self, variable, alert_function):
+        """
+        will alert_function() whenever specified variable is altered
+        """
         self.variables[variable].listen(alert_function)
 
 
@@ -943,30 +975,60 @@ class OutputDriver(VariableMatrix):
 
 
 class WaitingQueue():
-    def __init__(self):
+    """
+    object that, when run(), will wait and execute actions in it's queue at their designated time. Objects can be
+    added to the queue at any time, but it will take a maximum of 10 seconds for them to be properly processed.
+    If they would run at that time, they instead run directly afterwards
+    """
+
+    def __init__(self, update_period=10):
+        """
+        :param update_period: number of seconds, to wait before checking for changes to the queue. This should be
+        between 3 and 10 to save CPU, but also preserve responsiveness
+        :return:
+        """
         self.queue = []
         self.oldqueue = self.queue
+        self.update_period = datetime.timedelta(seconds=update_period)
         self.next_time = (datetime.datetime.today() + datetime.timedelta(days=900))
-        self.run()
+
+    def append(self, obj):
+        """
+        adds an action to the queue to run at it's trigger time.
+        :param obj: an obj with a datetime obj as a value and some post() function that can be run
+        :return:
+        """
+        self.queue.append(obj)
 
     def run(self):
-        delta_time = self.next_time - datetime.datetime.today()
-        update_period = datetime.timedelta(seconds=10)
+        """
+        this function should be run in it's own thread as it will never return or end.
+        :return: NEVER
+        """
         while True:
-            if update_period >= delta_time:
-                delta_time = self.next_time - datetime.datetime.today()
-                time.sleep(delta_time)
-                self.actions_queue[0].post()
-                del self.times_queue[0]
-                del self.actions_queue[0]
-            if self.queue != self.oldqueue:
-                self.update()
-                delta_time = self.next_time - datetime.datetime.today()
-            else:
-                time.sleep(min(update_period.total_seconds(), delta_time) - 1)
-                delta_time = self.next_time - datetime.datetime.today()
+            idle = True  # if idle remains true, it means no action is being taken and there is no chance of sleeping
+            # through the next event in the queue
+            if len(self.queue):  # if there is nothing in the queue, do nothing, naturally
+                delta_time = self.queue[0].value - datetime.datetime.today()
+                if self.update_period >= delta_time:
+                    idle = False  # if the following code is executed, the event in the queue will change and the
+                    # delta_time will change with it. This means the next event could be 3 seconds away
+                    #               meaning sleeping for the update_period could cause problems
+                    if delta_time > datetime.timedelta():
+                        time.sleep(delta_time.total_seconds())
+                    self.queue[0].post()
+                    time.sleep(.05)
+                    self.update()
+                if self.queue != self.oldqueue:
+                    idle = False
+                    self.update()
 
+            if idle:  # this will not run if either of the above if statements have run. If the first runs, the second
+                # must also run because self.queue will be modified.
+                time.sleep(self.update_period.total_seconds())
 
     def update(self):
-        self.queue.sort()
+        self.queue.sort(key=lambda waitingObj: waitingObj.value)
+        self.oldqueue = self.queue
         pass
+

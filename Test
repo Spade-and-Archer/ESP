@@ -1,7 +1,14 @@
 from Classes import *
+from Bootlacer import scheduler
 
-for weekday in range(0, 7):
-    print weekday
-    testTime = TimeVariable('5/' + str(weekday) + ':12,13,14.30,35,40.10,20,30', time_format="$M/$W:%h.%M.%S")
-    print testTime.targetTime
-    print testTime
+
+def testPost(*args):
+    print 'this time:', datetime.datetime.today()
+    print 'running'
+    print args
+
+
+testTime = TimeVariable('16,17,19,20,25,26,27,28,52,53,60:0,20,30,40,50', scheduler,
+                        time_format="%M:%S", post_method=testPost)
+print testTime.targetTime
+print testTime
