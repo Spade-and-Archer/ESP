@@ -15,4 +15,4 @@ class dummy():
 
 
 main = dummy()
-#  module should have a 'main' object that is an output driver, module, or input driver depending on folder
+# module should have a 'main' object that is an output driver, module, or input driver depending on folder

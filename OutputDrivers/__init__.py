@@ -12,7 +12,7 @@ list_of_modules = glob.glob(parent_folder)  # gets a list of all python files in
 print list_of_modules  # DO NOT REMOVE
 print __file__  # bug where all variables are none because this is still initiating or something.
 # print statement makes this pause for a sec and collect these variables/wait for them to get into ram/do magic
-#  honestly, this is the weirdest bug ever, just don't get rid of these
+# honestly, this is the weirdest bug ever, just don't get rid of these
 try:
     list_of_modules.remove(__file__)
 except:
