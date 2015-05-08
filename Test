@@ -8,7 +8,7 @@ def testPost(*args):
     print args
 
 
-testTime = TimeVariable('16,17,19,20,25,26,27,28,52,53,60:0,20,30,40,50', scheduler,
+testTime = TimeVariable('16,17,19,20,25,26,27,28,52,53:0,20,30,40,50', scheduler,
                         time_format="%M:%S", post_method=testPost)
 print testTime.targetTime
 print testTime
