@@ -1,0 +1,6 @@
+# ESP
+Extended Scheduling Program designed to allow interfacing between incompatible devices. It allows for the creation of modules -which adhere to strict protocols- as well as more loosely controlled input/output drivers. Through the use of listeners, any event may be triggered by, managed by, or informed of any module at any time.
+
+This is an abandoned project. Initially, I had plans to use this to control several smart devices in my home, mostly it was made because I enjoyed programming it.
+
+In theory, there is a Light module that I have created, and which I evidently failed to upload (and have subsequently lost) that controlled some WIFI-LEDs in my home. It should be fairly striaght forward to create your own modules if you are so inclined, and all the groundwork has been laid to make creating, triggering, and combining events very straightforward. This project is scaleable, although no work has been done on any kind of installer. It should be run on a stand-alone server and have an installer that ensures it boots up with the server. Also, I believe saving settings in an XML file is something that also needs to be done. Right now, events can only be created programmatically through an INIT file. 
